@@ -12,6 +12,6 @@ int main(int argc, const char *argv[]) {
     // by a NULL pointer.  (Thus, in the new program, argv[argc] will be
     // NULL.)
     printf("Replace current process with /bin/getpid\n");
-    char *newargv[] = { "getpid" , NULL};
+    char *newargv[] = { "getpid", NULL};
     execve("/bin/getpid", newargv, NULL);
- }
+}

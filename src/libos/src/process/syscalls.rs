@@ -1,9 +1,10 @@
 use super::do_arch_prctl::ArchPrctlCode;
 use super::do_clone::CloneFlags;
 use super::do_futex::{FutexFlags, FutexOp, FutexTimeout};
-use super::do_spawn::FileAction;
+use super::do_spawn::{new_process, FileAction};
 use super::prctl::PrctlCmd;
 use super::process::ProcessFilter;
+use super::table::{self};
 use crate::prelude::*;
 use crate::time::{timespec_t, ClockID};
 use crate::util::mem_util::from_user::*;
@@ -22,7 +23,7 @@ pub fn do_spawn_for_musl(
     let envp = clone_cstrings_safely(envp)?;
     let file_actions = clone_file_actions_safely(fdop_list)?;
     let current = current!();
-    debug!(
+    warn!(
         "spawn: path: {:?}, argv: {:?}, envp: {:?}, fdop: {:?}",
         path, argv, envp, file_actions
     );
@@ -399,3 +400,41 @@ pub fn do_geteuid() -> Result<isize> {
 pub fn do_getegid() -> Result<isize> {
     Ok(0)
 }
+
+// DEBUG: get args of execve
+// execve() executes the program referred to by pathname.  This
+//        causes the program that is currently being run by the calling
+//        process to be replaced with a new program, with newly initialized
+//        stack, heap, and (initialized and uninitialized) data segments.
+pub fn do_execve(
+    pathname: *const i8,
+    argv: *const *const i8,
+    envp: *const *const i8,
+) -> Result<isize> {
+    let pathname = clone_cstring_safely(pathname)?
+        .to_string_lossy()
+        .into_owned();
+    let argv = clone_cstrings_safely(argv)?;
+    let envp = clone_cstrings_safely(envp)?;
+    let current = current!();
+    warn!(
+        "execve: path: {:?}, argv: {:?}, envp: {:?}",
+        pathname, argv, envp
+    );
+    let new_process = current.process().clone();
+    // new_process create a new process and its main thread
+    // we want to create a new process to replace current process and current main thread
+
+    table::del_process(current.process().pid());
+    table::add_process(new_process_ref.clone());
+    Ok(0)
+}
+
+// fn new_process(
+//     file_path: &str,
+//     argv: &[CString],
+//     envp: &[CString],
+//     file_actions: &[FileAction],
+//     host_stdio_fds: Option<&HostStdioFds>,
+//     current_ref: &ThreadRef,
+// ) -> Result<ProcessRef> {

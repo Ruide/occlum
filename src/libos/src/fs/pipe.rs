@@ -87,6 +87,26 @@ impl File for PipeReader {
     fn as_any(&self) -> &dyn Any {
         self
     }
+
+    // do_fstat on pipe asks for Metadata. Here we create a dummy one. Because jspawnhelper check for st_mode FIFO.
+    fn metadata(&self) -> Result<Metadata> {
+        Ok(Metadata {
+            dev: 0,
+            inode: 0,
+            size: 0,
+            blk_size: 0,
+            blocks: 0,
+            atime: Timespec { sec: 0, nsec: 0 },
+            mtime: Timespec { sec: 0, nsec: 0 },
+            ctime: Timespec { sec: 0, nsec: 0 },
+            type_: FileType::NamedPipe,
+            mode: 0o10000, // octal, base 8. 0o10000 is named pipe (fifo)
+            nlinks: 0,
+            uid: 0,
+            gid: 0,
+            rdev: 0,
+        })
+    }
 }
 
 pub struct PipeWriter {

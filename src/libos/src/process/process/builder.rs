@@ -130,6 +130,55 @@ impl ProcessBuilder {
         Ok(new_process)
     }
 
+    pub fn build_replace(mut self, tid: u32) -> Result<ProcessRef> {
+        // Process's pid == To be replaced Main thread's tid
+        let pid = tid;
+
+        // Check whether parent is given as expected
+        if self.no_parent != self.parent.is_none() {
+            return_errno!(
+                EINVAL,
+                "parent and no_parent config contradicts with one another"
+            );
+        }
+
+        // Build a new process
+        let new_process = {
+            let exec_path = self.exec_path.take().unwrap_or_default();
+            let parent = self.parent.take().map(|parent| RwLock::new(parent));
+            let inner = SgxMutex::new(ProcessInner::new());
+            let sig_dispositions = RwLock::new(SigDispositions::new());
+            let sig_queues = RwLock::new(SigQueues::new());
+            let forced_exit_status = ForcedExitStatus::new();
+            Arc::new(Process {
+                pid,
+                exec_path,
+                parent,
+                inner,
+                sig_dispositions,
+                sig_queues,
+                forced_exit_status,
+            })
+        };
+
+        // Build the main thread of the new process
+        let mut self_ =
+            self.thread_builder(|tb| tb.tid(ThreadId { tid }).process(new_process.clone()));
+        let main_thread = self_.thread_builder.take().unwrap().build()?;
+
+        // Associate the new process with its parent
+        if !self_.no_parent {
+            new_process
+                .parent()
+                .inner()
+                .children_mut()
+                .unwrap()
+                .push(new_process.clone());
+        }
+
+        Ok(new_process)
+    }
+
     fn thread_builder<F>(mut self, f: F) -> Self
     where
         F: FnOnce(ThreadBuilder) -> ThreadBuilder,

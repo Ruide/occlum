@@ -218,6 +218,137 @@ fn new_process(
     Ok(new_process_ref)
 }
 
+/// Create a new process from current thread and replace current thread
+fn replace_process(
+    file_path: &str,
+    argv: &[CString],
+    envp: &[CString],
+    host_stdio_fds: Option<&HostStdioFds>,
+    current_ref: &ThreadRef,
+) -> Result<ProcessRef> {
+    let mut argv = argv.clone().to_vec();
+    let (is_script, elf_inode, mut elf_buf, elf_header) =
+        load_exec_file_hdr_to_vec(file_path, current_ref)?;
+
+    // elf_path might be different from file_path because file_path could lead to a script text file.
+    // And intepreter will be the loaded ELF.
+    let elf_path = if let Some(interpreter_path) = is_script {
+        if argv.len() == 0 {
+            return_errno!(EINVAL, "argv[0] not found");
+        }
+        argv.insert(0, CString::new(interpreter_path.as_str())?);
+        argv[1] = CString::new(file_path)?; // script file needs to be the full path
+        interpreter_path
+    } else {
+        file_path.to_string()
+    };
+
+    let exec_elf_hdr = ElfFile::new(&elf_inode, &mut elf_buf, elf_header)
+        .cause_err(|e| errno!(e.errno(), "invalid executable"))?;
+    let ldso_path = exec_elf_hdr
+        .elf_interpreter()
+        .ok_or_else(|| errno!(EINVAL, "cannot find the interpreter segment"))?;
+    trace!("ldso_path = {:?}", ldso_path);
+    let (ldso_inode, mut ldso_elf_hdr_buf, ldso_elf_header) =
+        load_file_hdr_to_vec(ldso_path, current_ref)
+            .cause_err(|e| errno!(e.errno(), "cannot load ld.so"))?;
+    let ldso_elf_header = if ldso_elf_header.is_none() {
+        return_errno!(ENOEXEC, "ldso header is not ELF format");
+    } else {
+        ldso_elf_header.unwrap()
+    };
+    let ldso_elf_hdr = ElfFile::new(&ldso_inode, &mut ldso_elf_hdr_buf, ldso_elf_header)
+        .cause_err(|e| errno!(e.errno(), "invalid ld.so"))?;
+
+    let new_process_ref = {
+        // the newly created process to replace old process point to same parent as old process
+        let parent_process_ref = current_ref.process().parent().clone();
+
+        let vm = init_vm::do_init(&exec_elf_hdr, &ldso_elf_hdr)?;
+        let mut auxvec = init_auxvec(&vm, &exec_elf_hdr)?;
+
+        // Notify debugger to load the symbols from elf file
+        let ldso_elf_base = vm.get_elf_ranges()[1].start() as u64;
+        unsafe {
+            occlum_gdb_hook_load_elf(
+                ldso_elf_base,
+                ldso_path.as_ptr() as *const u8,
+                ldso_path.len() as u64,
+            );
+        }
+        let exec_elf_base = vm.get_elf_ranges()[0].start() as u64;
+        unsafe {
+            occlum_gdb_hook_load_elf(
+                exec_elf_base,
+                elf_path.as_ptr() as *const u8,
+                elf_path.len() as u64,
+            );
+        }
+
+        let task = {
+            let ldso_entry = {
+                let ldso_range = vm.get_elf_ranges()[1];
+                let ldso_entry = ldso_range.start() + ldso_elf_hdr.elf_header().e_entry as usize;
+                if !ldso_range.contains(ldso_entry) {
+                    return_errno!(EINVAL, "Invalid program entry");
+                }
+                ldso_entry
+            };
+            let user_stack_base = vm.get_stack_base();
+            let user_stack_limit = vm.get_stack_limit();
+            let user_rsp = init_stack::do_init(user_stack_base, 4096, &argv, envp, &mut auxvec)?;
+            unsafe {
+                Task::new(
+                    ldso_entry,
+                    user_rsp,
+                    user_stack_base,
+                    user_stack_limit,
+                    None,
+                )?
+            }
+        };
+        let vm_ref = Arc::new(vm);
+        let files_ref = {
+            let mut file_actions: Vec<FileAction> = Vec::new();
+            // By default, file descriptors remain open across an execve(). File descriptors that are marked close-on-exec are closed;
+            let files = init_files(current_ref, &file_actions, host_stdio_fds)?;
+            Arc::new(SgxMutex::new(files))
+        };
+        let fs_ref = Arc::new(SgxMutex::new(current_ref.fs().lock().unwrap().clone()));
+        let sched_ref = Arc::new(SgxMutex::new(current_ref.sched().lock().unwrap().clone()));
+        let rlimit_ref = Arc::new(SgxMutex::new(current_ref.rlimits().lock().unwrap().clone()));
+
+        // Make the default thread name to be the process's corresponding elf file name
+        let elf_name = elf_path.rsplit('/').collect::<Vec<&str>>()[0];
+        let thread_name = ThreadName::new(elf_name);
+
+        ProcessBuilder::new()
+            .vm(vm_ref)
+            .exec_path(&elf_path)
+            .parent(parent_process_ref)
+            .task(task)
+            .sched(sched_ref)
+            .rlimits(rlimit_ref)
+            .fs(fs_ref)
+            .files(files_ref)
+            .name(thread_name)
+            .build_replace(current_ref.tid())?
+    };
+
+    table::del_process(current_ref.process().pid());
+    table::add_process(new_process_ref.clone());
+    table::del_thread(current_ref.tid());
+    table::add_thread(new_process_ref.main_thread().unwrap());
+
+    warn!(
+        "Process replaced by: elf = {}, pid = {}",
+        elf_path,
+        new_process_ref.pid()
+    );
+
+    Ok(new_process_ref)
+}
+
 #[derive(Debug)]
 pub enum FileAction {
     /// open(path, oflag, mode) had been called, and the returned file

@@ -23,7 +23,6 @@ init_instance() {
         .entry_points = [ "/usr/lib/jvm/java-11-openjdk-amd64/bin" ] |
         .env.default = [ "LD_LIBRARY_PATH=/usr/lib/jvm/java-11-openjdk-amd64/lib/server:/usr/lib/jvm/java-11-openjdk-amd64/lib:/usr/lib/jvm/java-11-openjdk-amd64/../lib:/lib" ]' Occlum.json)" && \
     echo "${new_json}" > Occlum.json
-
 }
 
 build_flink() {
@@ -50,16 +49,16 @@ run_taskmanager() {
 	-XX:ActiveProcessorCount=2 \
 	-Dlog.file=$log \
 	-Dos.name=Linux \
-	-Dlog4j.configuration=file:/bin/conf/log4j.properties \
-	-Dlogback.configurationFile=file:/bin/conf/logback.xml \
+	-Dlog4j.configuration=file:/bin/conf/log4j-console.properties \
+	-Dlogback.configurationFile=file:/bin/conf/logback-console.xml \
 	-classpath /bin/lib/flink-table-blink_2.11-1.10.1.jar:/bin/lib/flink-table_2.11-1.10.1.jar:/bin/lib/log4j-1.2.17.jar:/bin/lib/slf4j-log4j12-1.7.15.jar:/bin/lib/flink-dist_2.11-1.10.1.jar org.apache.flink.runtime.taskexecutor.TaskManagerRunner \
 	--configDir /bin/conf \
-	-D taskmanager.memory.network.max=64mb \
-	-D taskmanager.memory.network.min=64mb \
-	-D taskmanager.memory.managed.size=128mb \
+	-D taskmanager.memory.network.max=512mb \
+	-D taskmanager.memory.network.min=512mb \
+	-D taskmanager.memory.managed.size=1gb \
 	-D taskmanager.cpu.cores=1.0 \
-	-D taskmanager.memory.task.heap.size=256mb \
-    &
+	-D taskmanager.memory.task.heap.size=1gb
+    # &
 }
 
 run_task() {
