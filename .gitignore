@@ -4,3 +4,5 @@
 *.orig
 build/
 .DS_Store
+src/libos/target/
+src/workspace.code-workspace
