@@ -40,7 +40,7 @@ use crate::net::{
     do_socket, do_socketpair, msghdr, msghdr_mut,
 };
 use crate::process::{
-    do_arch_prctl, do_clone, do_exit, do_exit_group, do_futex, do_getegid, do_geteuid, do_getgid,
+    do_arch_prctl, do_clone, do_exit, do_exit_group, do_futex, do_getegid, do_geteuid, do_getgid, do_getgroups,
     do_getpgid, do_getpid, do_getppid, do_gettid, do_getuid, do_prctl, do_set_tid_address,
     do_spawn_for_glibc, do_spawn_for_musl, do_wait4, pid_t, FdOp, SpawnFileActions, ThreadStatus,
 };
@@ -199,7 +199,7 @@ macro_rules! process_syscall_table_with_callback {
             (Setsid = 112) => handle_unsupported(),
             (Setreuid = 113) => handle_unsupported(),
             (Setregid = 114) => handle_unsupported(),
-            (Getgroups = 115) => handle_unsupported(),
+            (Getgroups = 115) => do_getgroups(size: u32, list: *mut u32),
             (Setgroups = 116) => handle_unsupported(),
             (Setresuid = 117) => handle_unsupported(),
             (Getresuid = 118) => handle_unsupported(),

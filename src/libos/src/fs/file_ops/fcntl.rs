@@ -22,11 +22,14 @@ pub enum FcntlCmd<'a> {
     GetLk(&'a mut flock),
     /// Acquire or release a file lock
     SetLk(&'a flock),
+    /// Acquire or release a file lock, block the process until request can be completed
+    SetLkw(&'a flock),
 }
 
 impl<'a> FcntlCmd<'a> {
     #[deny(unreachable_patterns)]
     pub fn from_raw(cmd: u32, arg: u64) -> Result<FcntlCmd<'a>> {
+        error!("cmd for fcntl is {:?}", cmd);
         Ok(match cmd as c_int {
             libc::F_DUPFD => FcntlCmd::DupFd(arg as FileDesc),
             libc::F_DUPFD_CLOEXEC => FcntlCmd::DupFdCloexec(arg as FileDesc),
@@ -45,6 +48,12 @@ impl<'a> FcntlCmd<'a> {
                 from_user::check_ptr(flock_ptr)?;
                 let flock_c = unsafe { &*flock_ptr };
                 FcntlCmd::SetLk(flock_c)
+            }
+            libc::F_SETLKW => {
+                let flock_ptr = arg as *const flock;
+                from_user::check_ptr(flock_ptr)?;
+                let flock_c = unsafe { &*flock_ptr };
+                FcntlCmd::SetLkw(flock_c)
             }
             _ => return_errno!(EINVAL, "unsupported command"),
         })
@@ -105,7 +114,8 @@ pub fn do_fcntl(fd: FileDesc, cmd: &mut FcntlCmd) -> Result<isize> {
         FcntlCmd::SetLk(flock_c) => {
             let file = file_table.get(fd)?;
             let lock = Flock::from_c(*flock_c)?;
-            file.set_advisory_lock(&lock)?;
+            // bypass it for now for Spark executor
+            // file.set_advisory_lock(&lock)?;
             0
         }
     };

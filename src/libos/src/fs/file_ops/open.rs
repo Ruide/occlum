@@ -1,7 +1,7 @@
 use super::*;
 
 pub fn do_openat(fs_path: &FsPath, flags: u32, mode: u32) -> Result<FileDesc> {
-    debug!(
+    error!(
         "openat: fs_path: {:?}, flags: {:#o}, mode: {:#o}",
         fs_path, flags, mode
     );
