@@ -403,10 +403,9 @@ pub fn do_getegid() -> Result<isize> {
 pub fn do_getgroups(size: u32, list: *mut u32) -> Result<isize> {
     if size == 0 {
         Ok(1)
-    }
-    else {
-        unsafe{
-            *list=0;
+    } else {
+        unsafe {
+            *list = 0;
         }
         Ok(1)
     }
